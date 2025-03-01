@@ -22,6 +22,7 @@
 #if defined(__USE_OPENCL__) || defined(__USE_CUDA__)
 
 #include <stdio.h>
+#include <unistd.h>
 #include <stdlib.h>
 #include <memory.h>
 #include <stdarg.h>
@@ -65,16 +66,66 @@ void LogError(const char* str, ...)
 int ReadSourceFromFile(const char* fileName, char** source, size_t* sourceSize)
 {
     int errorCode = RSEC_SUCCESS;
+    
+#ifdef __linux__
+    // Linux implementation
+    char executablePath[4096] = {0}; // Use a reasonable size for Linux
+    ssize_t count = readlink("/proc/self/exe", executablePath, 4096);
+    if (count <= 0) {
+        LogError("Error: Couldn't determine executable path.\n");
+        return RSEC_FILE_NOT_EXIST;
+    }
+    executablePath[count] = '\0'; // readlink doesn't null-terminate
+    
+    // Remove executable name to get directory
+    char* lastSlash = strrchr(executablePath, '/');
+    if (lastSlash) {
+        *(lastSlash + 1) = '\0';
+    }
+#elif defined(_WIN32)
+    // Windows implementation
+    char executablePath[MAX_PATH] = {0}; // MAX_PATH is defined in Windows headers
+    DWORD count = GetModuleFileNameA(NULL, executablePath, MAX_PATH);
+    if (count == 0) {
+        LogError("Error: Couldn't determine executable path.\n");
+        return RSEC_FILE_NOT_EXIST;
+    }
+    
+    // Remove executable name to get directory
+    char* lastSlash = strrchr(executablePath, '\\');
+    if (lastSlash) {
+        *(lastSlash + 1) = '\0';
+    }
+#else
+    // Fallback for other platforms
+    LogError("Error: Executable path detection not implemented for this platform.\n");
+    return RSEC_FILE_NOT_EXIST;
+#endif
+
+    // Calculate required buffer size and allocate
+    size_t dirLength = strlen(executablePath);
+    size_t fileNameLength = strlen(fileName);
+    size_t fullPathSize = dirLength + fileNameLength + 1;
+    
+    char* fullPath = new char[fullPathSize];
+    if (fullPath == NULL) {
+        LogError("Error: Couldn't allocate memory for path.\n");
+        return RSEC_OUT_OF_HOST_MEMORY;
+    }
+    
+    // Construct full path by combining executable directory and filename
+    snprintf(fullPath, fullPathSize, "%s%s", executablePath, fileName);
 
     FILE* fp = NULL;
 #ifdef __linux__
-    fp = fopen(fileName, "rb");
+    fp = fopen(fullPath, "rb");
 #else
-    fopen_s(&fp, fileName, "rb");
+    fopen_s(&fp, fullPath, "rb");
 #endif
     if (fp == NULL)
     {
-        LogError("Error: Couldn't find program source file '%s'.\n", fileName);
+        LogError("Error: Couldn't find program source file '%s'.\n", fullPath);
+        delete[] fullPath;
         errorCode = RSEC_FILE_NOT_EXIST;
     }
     else {
@@ -85,13 +136,18 @@ int ReadSourceFromFile(const char* fileName, char** source, size_t* sourceSize)
         *source = new char[*sourceSize + 1];
         if (*source == NULL)
         {
-            LogError("Error: Couldn't allocate %d bytes for program source from file '%s'.\n", *sourceSize, fileName);
+            LogError("Error: Couldn't allocate %d bytes for program source from file '%s'.\n", 
+                     *sourceSize, fullPath);
+            delete[] fullPath;
+            fclose(fp);
             errorCode = RSEC_OUT_OF_HOST_MEMORY;
         }
         else {
             fread(*source, 1, *sourceSize, fp);
-			(*source)[*sourceSize] = '\0';
+            (*source)[*sourceSize] = '\0';
+            fclose(fp);
         }
+        delete[] fullPath;
     }
     return errorCode;
 }

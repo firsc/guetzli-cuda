@@ -1,3 +1,67 @@
+# Fork Notes
+
+This is a personal fork which implements the steps from the original README
+below to include CUDA (I did *not* include OpenCL) and *further* fixes/changes
+a few things to actually make it work on my system (Ubuntu22 on WSL). These
+steps are outlined below:
+
+1. `-lcuda` not found during compilation
+ 
+  In my case, `libcuda.so` was not inside the expected place
+  (`/usr/local/cuda/lib64`), but inside a `stubs` subfolder
+  (`/usr/local/cuda/lib64/stubs`). I simply created a symbolic link into
+  `lib64`, but maybe adding `stubs` to `libdirs` or `LD_LIBRARY_PATH` would
+  have also worked
+
+2. turbojpeg stuff not found
+
+  I had to additionally `apt install libturbojpeg0-dev` and add `turbojpeg` to
+  the list of `links` inside `premake5.lua`.
+
+3. install premake5
+
+  The newest prebuilt for premake v5-beta5 is too new for my crusty Ubuntu22
+  (outdated glibc), so I had to build from source:
+
+  ```bash
+  cd ~/tmp
+  wget https://github.com/premake/premake-core/releases/download/v5.0.0-beta5/premake-5.0.0-beta5-src.zip
+  unzip premake-*.zip && rm premake-*.zip && cd premake-*
+  ./Bootstrap.sh
+  # and then link or copy bin/release/premake5 into PATH
+  ```
+
+4. Some minor code changes
+  - Inside `cuguetzli` I had to include `cmath` because some functions were missing (?)
+  - Inside `premake5.lua` I had to use `cppdialect` instead of `flags` for specifying `C++11`
+  - Inside `compile.sh` I used `compute_89` specific to my GPU architecture and added a `mkdir`
+
+5. QoL: PTX files are searched relative to binary
+
+  By default, when using `--cuda`, `guetzli` will look for
+  `clguetzli/clguetzli.cu.ptx64` *no matter in which folder we currently are*,
+  and will therefore fail if we are not inside the `bin/Release` folder where
+  this folder resides. I modified `utils:ReadSourceFromFile` to look for the
+  folder relative to the binary, so that `guetzli` can be used outside of the
+  release folder.
+
+  Note: Just after coding this fork I noticed that there is already another
+  fork by doterax which seems to cleverly embed these files. But the release
+  files are for Windows machines.
+
+
+Once the steps above have been done, we simply need to:
+
+```bash
+premake5 --os=linux gmake
+make clean  # always clean first
+make -j12
+./compile.sh 64  # creates clguetzli/clguetzli.cu.ptx64
+```
+
+
+# Original README
+
 <p align="center"><img src="https://cloud.githubusercontent.com/assets/203457/24553916/1f3f88b6-162c-11e7-990a-731b2560f15c.png" alt="Guetzli" width="64"></p>
 
 # Introduction
